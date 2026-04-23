@@ -572,7 +572,7 @@ with tab_analysis:
             m_df.style.format({
                 "รายรับ": "฿{:,.0f}", "รายจ่าย": "฿{:,.0f}",
                 "ออมได้": "฿{:,.0f}", "อัตราออม%": "{:.1f}%",
-            }).applymap(
+            }).map(
                 lambda v: "color:#4ade80" if isinstance(v, (int, float)) and v >= 0 else "color:#f87171",
                 subset=["ออมได้"],
             ),
