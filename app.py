@@ -118,16 +118,23 @@ with st.container(border=True):
 
 st.divider()
 
-# --- 7. จัดการประวัติการบันทึก (อยู่ล่างสุด) ---
+# --- 7. จัดการประวัติการบันทึก ---
 st.subheader("📋 จัดการประวัติการบันทึก")
 if not df_current.empty:
-    df_display = df_current.copy()
-    if "ลบ" not in df_display.columns:
-        df_display.insert(0, "ลบ", False)
+    # สร้างสำเนาข้อมูลและแปลงทุกคอลัมน์เป็น String เพื่อป้องกัน OverflowError
+    df_display = df_current.copy().astype(str) 
     
+    if "ลบ" not in df_display.columns:
+        # ใส่ค่า False เป็น Boolean เพื่อให้ Checkbox ทำงานได้
+        df_display.insert(0, "ลบ", False)
+        df_display["ลบ"] = False 
+
     edited_df = st.data_editor(
         df_display.iloc[::-1],
-        column_config={"ลบ": st.column_config.CheckboxColumn(help="ติ๊กเพื่อเลือกรายการที่ต้องการลบ")},
+        column_config={
+            "ลบ": st.column_config.CheckboxColumn(help="ติ๊กเพื่อเลือกรายการที่ต้องการลบ"),
+            "ID": None # ซ่อน ID ไว้
+        },
         disabled=["วันที่", "รายการ", "ประเภทหลัก", "จำนวนเงิน", "หมายเหตุ", "ID"],
         use_container_width=True,
         hide_index=True
