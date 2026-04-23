@@ -155,7 +155,10 @@ def append_row(row: dict, year: int):
 
 def delete_rows(ids_to_delete: list, year: int):
     df = load_data(year)
-    df = df[~df["ID"].isin(ids_to_delete)]
+    # Cast both sides to str so numeric vs string IDs always match
+    df["ID"] = df["ID"].astype(str)
+    ids_str = [str(i) for i in ids_to_delete]
+    df = df[~df["ID"].isin(ids_str)]
     save_all_data(df, year)
 
 SETTINGS_SHEET = "_settings"
@@ -446,9 +449,11 @@ with tab_history:
                 "รายการ": st.column_config.TextColumn("หมวดหมู่"),
                 "จำนวนเงิน": st.column_config.NumberColumn("จำนวนเงิน", format="฿%.2f"),
                 "หมายเหตุ": st.column_config.TextColumn("หมายเหตุ"),
-                "ID": None,
+                # Keep ID visible but read-only so it survives into `edited`
+                "ID": st.column_config.TextColumn("ID", disabled=True),
             },
             disabled=["วันที่_แสดง", "ประเภทหลัก", "รายการ", "จำนวนเงิน", "หมายเหตุ", "ID"],
+            column_order=["ลบ", "วันที่_แสดง", "ประเภทหลัก", "รายการ", "จำนวนเงิน", "หมายเหตุ"],
             width='stretch',
             hide_index=True,
         )
@@ -456,7 +461,7 @@ with tab_history:
         btn1, btn2, btn3 = st.columns(3)
         with btn1:
             if st.button("🗑️ ลบรายการที่เลือก", type="secondary", width='stretch'):
-                ids_del = edited[edited["ลบ"] == True]["ID"].tolist()
+                ids_del = edited[edited["ลบ"] == True]["ID"].astype(str).tolist()
                 if ids_del:
                     delete_rows(ids_del, selected_year)
                     st.success(f"ลบ {len(ids_del)} รายการเรียบร้อย!")
