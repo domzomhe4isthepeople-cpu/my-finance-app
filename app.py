@@ -141,11 +141,37 @@ def load_data(year: int) -> pd.DataFrame:
     except Exception:
         return pd.DataFrame()
 
+SETTINGS_SHEET = "_settings"
+
+def _write_sheet(sheet_name: str, df: pd.DataFrame):
+    """Safely write a single sheet without touching any other sheets."""
+    from openpyxl import load_workbook, Workbook
+    if os.path.exists(FILE_NAME):
+        wb = load_workbook(FILE_NAME)
+    else:
+        wb = Workbook()
+        # Remove the default empty sheet created by openpyxl
+        if "Sheet" in wb.sheetnames:
+            del wb["Sheet"]
+
+    # Remove old version of this sheet if it exists
+    if sheet_name in wb.sheetnames:
+        del wb[sheet_name]
+
+    # Write the new sheet via a temp ExcelWriter trick using openpyxl directly
+    ws = wb.create_sheet(sheet_name)
+    # Write header
+    for col_idx, col_name in enumerate(df.columns, 1):
+        ws.cell(row=1, column=col_idx, value=col_name)
+    # Write rows
+    for row_idx, row in enumerate(df.itertuples(index=False), 2):
+        for col_idx, value in enumerate(row, 1):
+            ws.cell(row=row_idx, column=col_idx, value=value)
+
+    wb.save(FILE_NAME)
+
 def save_all_data(df: pd.DataFrame, year: int):
-    mode = "a" if os.path.exists(FILE_NAME) else "w"
-    with pd.ExcelWriter(FILE_NAME, engine="openpyxl", mode=mode,
-                        if_sheet_exists="replace") as writer:
-        df.to_excel(writer, sheet_name=str(year), index=False)
+    _write_sheet(str(year), df)
 
 def append_row(row: dict, year: int):
     df = load_data(year)
@@ -155,13 +181,10 @@ def append_row(row: dict, year: int):
 
 def delete_rows(ids_to_delete: list, year: int):
     df = load_data(year)
-    # Cast both sides to str so numeric vs string IDs always match
     df["ID"] = df["ID"].astype(str)
     ids_str = [str(i) for i in ids_to_delete]
     df = df[~df["ID"].isin(ids_str)]
     save_all_data(df, year)
-
-SETTINGS_SHEET = "_settings"
 
 def load_settings() -> dict:
     if not os.path.exists(FILE_NAME):
@@ -174,10 +197,7 @@ def load_settings() -> dict:
 
 def save_settings(settings: dict):
     df_s = pd.DataFrame(list(settings.items()), columns=["key", "value"])
-    mode = "a" if os.path.exists(FILE_NAME) else "w"
-    with pd.ExcelWriter(FILE_NAME, engine="openpyxl", mode=mode,
-                        if_sheet_exists="replace") as writer:
-        df_s.to_excel(writer, sheet_name=SETTINGS_SHEET, index=False)
+    _write_sheet(SETTINGS_SHEET, df_s)
 
 # ─── SIDEBAR ───────────────────────────────────────────────────────────────────
 # Load persisted settings once per session
@@ -207,14 +227,20 @@ with st.sidebar:
     st.divider()
     st.caption("Developed by Chin 🚀  |  v2.1")
 
-# Auto-save settings whenever they differ from what was last saved
+# Auto-save settings only when values have actually changed
 _current_settings = {
     "selected_year": selected_year,
     "starting_balance": starting_balance,
     "monthly_budget": monthly_budget,
     "savings_goal": savings_goal,
 }
-if _current_settings != {k: _saved.get(k) for k in _current_settings}:
+_saved_comparable = {k: float(_saved[k]) if k != "selected_year" else int(_saved[k])
+                     for k in _current_settings if k in _saved}
+_needs_save = any(
+    _current_settings[k] != _saved_comparable.get(k)
+    for k in _current_settings
+)
+if _needs_save:
     save_settings(_current_settings)
 
 # ─── LOAD DATA ────────────────────────────────────────────────────────────────
