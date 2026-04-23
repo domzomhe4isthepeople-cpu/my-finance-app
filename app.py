@@ -1,158 +1,572 @@
 import streamlit as st
 import pandas as pd
 import os
-from datetime import datetime
+from datetime import datetime, date
 import plotly.express as px
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 
-# --- 1. การตั้งค่าพื้นฐาน ---
+# ─── CONFIG ────────────────────────────────────────────────────────────────────
 FILE_NAME = "money_tracker.xlsx"
-CURRENT_YEAR = datetime.now().year
-CURRENT_MONTH = datetime.now().month
-CURRENT_DAY = datetime.now().day
+NOW = datetime.now()
+CURRENT_YEAR  = NOW.year
+CURRENT_MONTH = NOW.month
+CURRENT_DAY   = NOW.day
 
-st.set_page_config(page_title="2026 Smart Wealth", layout="wide", page_icon="💰")
+MONTH_TH = ["", "ม.ค.", "ก.พ.", "มี.ค.", "เม.ย.", "พ.ค.", "มิ.ย.",
+             "ก.ค.", "ส.ค.", "ก.ย.", "ต.ค.", "พ.ย.", "ธ.ค."]
 
-# ฟังก์ชันบันทึกข้อมูล
-def save_all_data(df, year_sheet):
-    with pd.ExcelWriter(FILE_NAME, engine='openpyxl', mode='a', if_sheet_exists='replace') as writer:
-        df.to_excel(writer, sheet_name=str(year_sheet), index=False)
+CATEGORY_CONFIG = {
+    # ประเภท: (emoji, สี, ประเภทหลัก)
+    "เงินเดือน":        ("💼", "#22c55e", "รายรับ"),
+    "รายได้เสริม":      ("💡", "#10b981", "รายรับ"),
+    "โบนัส":            ("🎁", "#34d399", "รายรับ"),
+    "ค่าอาหาร":         ("🍜", "#f59e0b", "รายจ่าย"),
+    "ค่าเดินทาง":       ("🚗", "#ef4444", "รายจ่าย"),
+    "ค่าที่พัก":        ("🏠", "#ec4899", "รายจ่าย"),
+    "ค่าสาธารณูปโภค":  ("⚡", "#a78bfa", "รายจ่าย"),
+    "ค่าสุขภาพ":        ("🏥", "#06b6d4", "รายจ่าย"),
+    "ความบันเทิง":      ("🎮", "#8b5cf6", "รายจ่าย"),
+    "ช้อปปิ้ง":         ("🛍️", "#f97316", "รายจ่าย"),
+    "การออม":           ("🏦", "#14b8a6", "รายจ่าย"),
+    "อื่น ๆ":           ("📌", "#94a3b8", "รายจ่าย"),
+}
 
-def append_data(data, year_sheet):
-    if os.path.exists(FILE_NAME):
-        with pd.ExcelWriter(FILE_NAME, engine='openpyxl', mode='a', if_sheet_exists='overlay') as writer:
-            try:
-                existing_df = pd.read_excel(FILE_NAME, sheet_name=str(year_sheet))
-                updated_df = pd.concat([existing_df, data], ignore_index=True)
-                updated_df.to_excel(writer, sheet_name=str(year_sheet), index=False)
-            except:
-                data.to_excel(writer, sheet_name=str(year_sheet), index=False)
-    else:
-        with pd.ExcelWriter(FILE_NAME, engine='openpyxl') as writer:
-            data.to_excel(writer, sheet_name=str(year_sheet), index=False)
+INCOME_CATS  = [k for k, v in CATEGORY_CONFIG.items() if v[2] == "รายรับ"]
+EXPENSE_CATS = [k for k, v in CATEGORY_CONFIG.items() if v[2] == "รายจ่าย"]
+ALL_CATS     = INCOME_CATS + EXPENSE_CATS
 
-# --- 2. Sidebar ---
-with st.sidebar:
-    st.image("https://cdn-icons-png.flaticon.com/512/2489/2489756.png", width=80)
-    st.title("Settings")
-    selected_year = st.number_input("📅 เลือกปีคริสต์ศักราช", value=CURRENT_YEAR)
-    starting_balance = st.number_input("💵 เงินต้นตั้งต้น (บาท)", min_value=0.0, value=0.0, step=1000.0)
-    st.divider()
-    st.caption("Developed by Chin 🚀")
+st.set_page_config(
+    page_title="Smart Wealth 2026",
+    layout="wide",
+    page_icon="💰",
+    initial_sidebar_state="expanded",
+)
 
-# --- 3. โหลดข้อมูล ---
-df_current = pd.DataFrame()
-if os.path.exists(FILE_NAME):
+# ─── CUSTOM CSS ────────────────────────────────────────────────────────────────
+st.markdown("""
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Prompt:wght@300;400;500;600;700&family=Space+Mono&display=swap');
+
+html, body, [class*="css"] {
+    font-family: 'Prompt', sans-serif;
+}
+.stApp { background: #0f172a; color: #e2e8f0; }
+
+/* Sidebar */
+[data-testid="stSidebar"] {
+    background: linear-gradient(180deg, #1e293b 0%, #0f172a 100%);
+    border-right: 1px solid #334155;
+}
+
+/* Metric cards */
+[data-testid="stMetric"] {
+    background: #1e293b;
+    border: 1px solid #334155;
+    border-radius: 16px;
+    padding: 20px !important;
+}
+[data-testid="stMetricLabel"] { color: #94a3b8 !important; font-size: 0.8rem !important; }
+[data-testid="stMetricValue"] { color: #f8fafc !important; font-size: 1.6rem !important; font-weight: 700; }
+[data-testid="stMetricDelta"] svg { display: none; }
+
+/* Buttons */
+.stButton > button[kind="primary"] {
+    background: linear-gradient(135deg, #6366f1, #8b5cf6) !important;
+    border: none !important; border-radius: 12px !important;
+    font-family: 'Prompt', sans-serif !important; font-weight: 600 !important;
+    transition: all .2s !important;
+}
+.stButton > button[kind="primary"]:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 25px rgba(99,102,241,.4) !important;
+}
+.stButton > button[kind="secondary"] {
+    background: #1e293b !important; color: #e2e8f0 !important;
+    border: 1px solid #475569 !important; border-radius: 12px !important;
+    font-family: 'Prompt', sans-serif !important;
+}
+
+/* Input / Select */
+.stSelectbox > div > div, .stNumberInput > div > div > input,
+.stTextInput > div > div > input {
+    background: #1e293b !important; border: 1px solid #334155 !important;
+    border-radius: 10px !important; color: #f1f5f9 !important;
+}
+
+/* Divider */
+hr { border-color: #1e293b !important; }
+
+/* Tabs */
+button[data-baseweb="tab"] {
+    font-family: 'Prompt', sans-serif !important; font-size: .85rem !important;
+    color: #94a3b8 !important;
+}
+button[data-baseweb="tab"][aria-selected="true"] {
+    color: #6366f1 !important; border-bottom-color: #6366f1 !important;
+}
+
+/* DataEditor */
+[data-testid="stDataFrame"] { border-radius: 12px; overflow: hidden; }
+
+/* section headers */
+.section-header {
+    display: flex; align-items: center; gap: 10px;
+    font-size: 1.15rem; font-weight: 600; color: #f1f5f9;
+    margin-bottom: 1rem;
+}
+
+/* badge */
+.badge {
+    display: inline-block; padding: 2px 10px; border-radius: 20px;
+    font-size: .7rem; font-weight: 600; font-family: 'Space Mono', monospace;
+}
+.badge-income  { background: #166534; color: #4ade80; }
+.badge-expense { background: #7f1d1d; color: #f87171; }
+
+/* progress bar */
+.budget-bar-wrap { background:#1e293b; border-radius:8px; height:8px; margin:6px 0; }
+.budget-bar-fill { height:8px; border-radius:8px; transition: width .4s; }
+</style>
+""", unsafe_allow_html=True)
+
+# ─── DATA HELPERS ──────────────────────────────────────────────────────────────
+def load_data(year: int) -> pd.DataFrame:
+    if not os.path.exists(FILE_NAME):
+        return pd.DataFrame()
     try:
-        df_current = pd.read_excel(FILE_NAME, sheet_name=str(selected_year))
-    except:
-        pass
+        df = pd.read_excel(FILE_NAME, sheet_name=str(year))
+        df["วันที่"] = pd.to_datetime(df["วันที่"], errors="coerce")
+        return df
+    except Exception:
+        return pd.DataFrame()
 
-# --- 4. คำนวณและแสดง Dashboard ---
-income_total = 0
-expense_total = 0
-if not df_current.empty:
-    income_total = df_current[df_current['ประเภทหลัก'] == 'รายรับ']['จำนวนเงิน'].sum()
-    expense_total = df_current[df_current['ประเภทหลัก'] == 'รายจ่าย']['จำนวนเงิน'].sum()
+def save_all_data(df: pd.DataFrame, year: int):
+    mode = "a" if os.path.exists(FILE_NAME) else "w"
+    with pd.ExcelWriter(FILE_NAME, engine="openpyxl", mode=mode,
+                        if_sheet_exists="replace") as writer:
+        df.to_excel(writer, sheet_name=str(year), index=False)
 
+def append_row(row: dict, year: int):
+    df = load_data(year)
+    new_row = pd.DataFrame([row])
+    df = pd.concat([df, new_row], ignore_index=True)
+    save_all_data(df, year)
+
+def delete_rows(ids_to_delete: list, year: int):
+    df = load_data(year)
+    df = df[~df["ID"].isin(ids_to_delete)]
+    save_all_data(df, year)
+
+SETTINGS_SHEET = "_settings"
+
+def load_settings() -> dict:
+    if not os.path.exists(FILE_NAME):
+        return {}
+    try:
+        df_s = pd.read_excel(FILE_NAME, sheet_name=SETTINGS_SHEET)
+        return dict(zip(df_s["key"], df_s["value"]))
+    except Exception:
+        return {}
+
+def save_settings(settings: dict):
+    df_s = pd.DataFrame(list(settings.items()), columns=["key", "value"])
+    mode = "a" if os.path.exists(FILE_NAME) else "w"
+    with pd.ExcelWriter(FILE_NAME, engine="openpyxl", mode=mode,
+                        if_sheet_exists="replace") as writer:
+        df_s.to_excel(writer, sheet_name=SETTINGS_SHEET, index=False)
+
+# ─── SIDEBAR ───────────────────────────────────────────────────────────────────
+# Load persisted settings once per session
+_saved = load_settings()
+
+with st.sidebar:
+    st.markdown("<br>", unsafe_allow_html=True)
+    st.markdown("## 💰 Smart Wealth")
+    st.markdown("<p style='color:#64748b;font-size:.8rem;margin-top:-10px;'>ระบบจัดการการเงินส่วนตัว</p>", unsafe_allow_html=True)
+    st.divider()
+
+    selected_year = st.number_input(
+        "📅 ปี (ค.ศ.)", value=int(_saved.get("selected_year", CURRENT_YEAR)), step=1, format="%d")
+    starting_balance = st.number_input(
+        "💵 เงินต้นตั้งต้น (บาท)", min_value=0.0,
+        value=float(_saved.get("starting_balance", 0.0)), step=1000.0)
+
+    st.divider()
+    st.markdown("**🎯 ตั้งงบประมาณรายเดือน**")
+    monthly_budget = st.number_input(
+        "งบจ่ายต่อเดือน (บาท)", min_value=0.0,
+        value=float(_saved.get("monthly_budget", 0.0)), step=500.0)
+    savings_goal = st.number_input(
+        "เป้าหมายออม/เดือน (บาท)", min_value=0.0,
+        value=float(_saved.get("savings_goal", 0.0)), step=500.0)
+
+    st.divider()
+    st.caption("Developed by Chin 🚀  |  v2.1")
+
+# Auto-save settings whenever they differ from what was last saved
+_current_settings = {
+    "selected_year": selected_year,
+    "starting_balance": starting_balance,
+    "monthly_budget": monthly_budget,
+    "savings_goal": savings_goal,
+}
+if _current_settings != {k: _saved.get(k) for k in _current_settings}:
+    save_settings(_current_settings)
+
+# ─── LOAD DATA ────────────────────────────────────────────────────────────────
+df = load_data(selected_year)
+
+def get_totals(frame):
+    if frame.empty:
+        return 0.0, 0.0
+    inc = frame[frame["ประเภทหลัก"] == "รายรับ"]["จำนวนเงิน"].sum()
+    exp = frame[frame["ประเภทหลัก"] == "รายจ่าย"]["จำนวนเงิน"].sum()
+    return inc, exp
+
+income_total, expense_total = get_totals(df)
 final_balance = starting_balance + income_total - expense_total
 
-st.markdown(f"<h1 style='text-align: center;'>📉 บัญชีรายรับ-รายจ่าย ปี {selected_year}</h1>", unsafe_allow_html=True)
+# current-month filter
+df_month = pd.DataFrame()
+if not df.empty:
+    df_month = df[df["วันที่"].dt.month == CURRENT_MONTH]
+inc_month, exp_month = get_totals(df_month)
 
-c1, c2, c3 = st.columns(3)
-c1.container(border=True).metric("💰 เงินคงเหลือปัจจุบัน", f"{final_balance:,.2f} ฿")
-c2.container(border=True).metric("📈 รายรับสะสม", f"{income_total:,.2f} ฿")
-c3.container(border=True).metric("📉 รายจ่ายสะสม", f"{expense_total:,.2f} ฿", delta=f"{(income_total-expense_total):,.2f} ฿")
+# ─── HEADER ───────────────────────────────────────────────────────────────────
+st.markdown(f"""
+<div style='text-align:center; padding: 1.5rem 0 .5rem;'>
+  <h1 style='font-size:2rem; font-weight:700; color:#f1f5f9; letter-spacing:-.5px;'>
+    📊 บัญชีการเงิน <span style='color:#6366f1;'>ปี {selected_year}</span>
+  </h1>
+  <p style='color:#64748b; margin-top:-8px;'>อัปเดตล่าสุด: {NOW.strftime("%d/%m/%Y %H:%M")}</p>
+</div>
+""", unsafe_allow_html=True)
 
-# --- 5. กราฟวิเคราะห์ (ย้ายมาไว้ข้างบนเพื่อให้เห็นภาพรวมก่อน) ---
-if not df_current.empty:
-    g1, g2 = st.columns([2, 1])
-    with g1:
-        df_graph = df_current.copy()
-        df_graph['วันที่'] = pd.to_datetime(df_graph['วันที่'])
-        df_graph['เดือน'] = df_graph['วันที่'].dt.month
-        monthly_data = df_graph.groupby(['เดือน', 'ประเภทหลัก'])['จำนวนเงิน'].sum().reset_index()
-        fig_bar = px.bar(monthly_data, x='เดือน', y='จำนวนเงิน', color='ประเภทหลัก', barmode='group', 
-                         title="รายรับ-รายจ่าย รายเดือน", color_discrete_map={'รายรับ': '#2ecc71', 'รายจ่าย': '#e74c3c'})
-        st.plotly_chart(fig_bar, use_container_width=True)
-    with g2:
-        fig_pie = px.pie(df_current[df_current['ประเภทหลัก'] == 'รายจ่าย'], values='จำนวนเงิน', names='รายการ', 
-                         title="สัดส่วนรายจ่าย", hole=0.4)
-        st.plotly_chart(fig_pie, use_container_width=True)
+# ─── KPI CARDS ────────────────────────────────────────────────────────────────
+c1, c2, c3, c4 = st.columns(4)
+balance_delta = income_total - expense_total
+c1.metric("💰 เงินคงเหลือ (รวม)", f"฿{final_balance:,.0f}",
+          delta=f"{'▲' if balance_delta >= 0 else '▼'} ฿{abs(balance_delta):,.0f}")
+c2.metric("📈 รายรับสะสม (ปีนี้)", f"฿{income_total:,.0f}")
+c3.metric("📉 รายจ่ายสะสม (ปีนี้)", f"฿{expense_total:,.0f}")
+c4.metric(f"🗓️ รายจ่าย {MONTH_TH[CURRENT_MONTH]}", f"฿{exp_month:,.0f}",
+          delta=f"รายรับ ฿{inc_month:,.0f}" if inc_month else None)
+
+# Monthly budget progress
+if monthly_budget > 0 and exp_month > 0:
+    pct = min(exp_month / monthly_budget * 100, 100)
+    color = "#22c55e" if pct < 70 else "#f59e0b" if pct < 90 else "#ef4444"
+    st.markdown(f"""
+    <div style='background:#1e293b;border:1px solid #334155;border-radius:12px;padding:12px 18px;margin:.5rem 0;'>
+      <div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;'>
+        <span style='color:#94a3b8;font-size:.85rem;'>งบประมาณเดือนนี้</span>
+        <span style='color:{color};font-weight:700;font-size:.9rem;'>฿{exp_month:,.0f} / ฿{monthly_budget:,.0f} ({pct:.1f}%)</span>
+      </div>
+      <div class='budget-bar-wrap'><div class='budget-bar-fill' style='width:{pct}%;background:{color};'></div></div>
+    </div>""", unsafe_allow_html=True)
 
 st.divider()
 
-# --- 6. ส่วนเพิ่มรายการใหม่ (Full Width) ---
-st.subheader("➕ เพิ่มรายการใหม่")
-with st.container(border=True):
-    d1, d2, d3, d4 = st.columns([1, 1, 1.5, 1])
-    with d1:
-        month = st.selectbox("เดือน", range(1, 13), index=CURRENT_MONTH - 1)
-    with d2:
-        day = st.selectbox("วันที่", range(1, 32), index=CURRENT_DAY - 1)
-    with d3:
-        category = st.selectbox("หมวดหมู่", ["ค่าอาหาร", "ค่าใช้จ่าย", "เติมเกม", "เงินเดือน(รายรับ)"])
-    with d4:
-        amount = st.number_input("จำนวนเงิน", min_value=0.0)
-    
-    suggestions = [""]
-    if not df_current.empty:
-        suggestions = [""] + df_current['หมายเหตุ'].dropna().unique().tolist()
-    
-    is_new = st.checkbox("พิมพ์รายละเอียดใหม่เอง", value=True)
-    if is_new:
-        note = st.text_input("รายละเอียด", placeholder="เช่น กะเพราไข่ดาว")
+# ─── TABS ─────────────────────────────────────────────────────────────────────
+tab_overview, tab_add, tab_history, tab_analysis = st.tabs(
+    ["📊 ภาพรวม", "➕ บันทึกรายการ", "📋 ประวัติ", "🔍 วิเคราะห์เชิงลึก"])
+
+# ══════════════════════════════════════════════════════════════════════════════
+# TAB 1 – OVERVIEW
+# ══════════════════════════════════════════════════════════════════════════════
+with tab_overview:
+    if df.empty:
+        st.info("ยังไม่มีข้อมูลสำหรับปีนี้ กรุณาเพิ่มรายการในแท็บ 'บันทึกรายการ'")
     else:
-        note = st.selectbox("เลือกจากประวัติที่เคยบันทึก", options=suggestions)
-    
-    if st.button("💾 บันทึกข้อมูล", use_container_width=True, type="primary"):
-        main_type = "รายรับ" if "รายรับ" in category else "รายจ่าย"
-        new_data = pd.DataFrame([{
-            "วันที่": f"{selected_year}-{month:02d}-{day:02d}",
-            "รายการ": category, "ประเภทหลัก": main_type,
-            "จำนวนเงิน": amount, "หมายเหตุ": note,
-            "ID": datetime.now().strftime("%Y%m%d%H%M%S%f")
-        }])
-        append_data(new_data, selected_year)
-        st.success("บันทึกสำเร็จ!")
-        st.rerun()
+        g1, g2 = st.columns([3, 2])
 
-st.divider()
+        with g1:
+            # Monthly bar chart
+            df_graph = df.copy()
+            df_graph["เดือน"] = df_graph["วันที่"].dt.month
+            monthly = df_graph.groupby(["เดือน", "ประเภทหลัก"])["จำนวนเงิน"].sum().reset_index()
+            monthly["ชื่อเดือน"] = monthly["เดือน"].map(lambda m: MONTH_TH[m])
 
-# --- 7. จัดการประวัติการบันทึก ---
-st.subheader("📋 จัดการประวัติการบันทึก")
-if not df_current.empty:
-    # สร้างสำเนาข้อมูลและแปลงทุกคอลัมน์เป็น String เพื่อป้องกัน OverflowError
-    df_display = df_current.copy().astype(str) 
-    
-    if "ลบ" not in df_display.columns:
-        # ใส่ค่า False เป็น Boolean เพื่อให้ Checkbox ทำงานได้
-        df_display.insert(0, "ลบ", False)
-        df_display["ลบ"] = False 
+            fig_bar = px.bar(
+                monthly, x="ชื่อเดือน", y="จำนวนเงิน", color="ประเภทหลัก",
+                barmode="group", title="รายรับ-รายจ่าย รายเดือน",
+                color_discrete_map={"รายรับ": "#22c55e", "รายจ่าย": "#f87171"},
+                template="plotly_dark",
+            )
+            fig_bar.update_layout(
+                plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
+                font_family="Prompt", legend_title_text="",
+                title_font_size=15, margin=dict(t=50, b=10, l=0, r=0),
+            )
+            st.plotly_chart(fig_bar, width='stretch')
 
-    edited_df = st.data_editor(
-        df_display.iloc[::-1],
-        column_config={
-            "ลบ": st.column_config.CheckboxColumn(help="ติ๊กเพื่อเลือกรายการที่ต้องการลบ"),
-            "ID": None # ซ่อน ID ไว้
-        },
-        disabled=["วันที่", "รายการ", "ประเภทหลัก", "จำนวนเงิน", "หมายเหตุ", "ID"],
-        use_container_width=True,
-        hide_index=True
-    )
+        with g2:
+            # Expense pie
+            exp_df = df[df["ประเภทหลัก"] == "รายจ่าย"]
+            if not exp_df.empty:
+                fig_pie = px.pie(
+                    exp_df.groupby("รายการ")["จำนวนเงิน"].sum().reset_index(),
+                    values="จำนวนเงิน", names="รายการ",
+                    title="สัดส่วนรายจ่ายตามหมวดหมู่",
+                    hole=0.55, template="plotly_dark",
+                    color_discrete_sequence=px.colors.qualitative.Pastel,
+                )
+                fig_pie.update_layout(
+                    plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
+                    font_family="Prompt", showlegend=True,
+                    legend=dict(font_size=11),
+                    title_font_size=15, margin=dict(t=50, b=10, l=0, r=0),
+                )
+                st.plotly_chart(fig_pie, width='stretch')
 
-    col_btn1, col_btn2 = st.columns([1, 1])
-    with col_btn1:
-        if st.button("🗑️ ยืนยันการลบรายการที่เลือก", type="secondary", use_container_width=True):
-            ids_to_delete = edited_df[edited_df["ลบ"] == True]["ID"].tolist()
-            if ids_to_delete:
-                df_final = df_current[~df_current["ID"].isin(ids_to_delete)]
-                save_all_data(df_final, selected_year)
-                st.success("ลบรายการเรียบร้อย!")
-                st.rerun()
+        # Cumulative balance line
+        df_sorted = df.sort_values("วันที่").copy()
+        df_sorted["รายรับสุทธิ"] = df_sorted.apply(
+            lambda r: r["จำนวนเงิน"] if r["ประเภทหลัก"] == "รายรับ" else -r["จำนวนเงิน"], axis=1)
+        df_sorted["ยอดสะสม"] = starting_balance + df_sorted["รายรับสุทธิ"].cumsum()
+
+        fig_line = px.area(
+            df_sorted, x="วันที่", y="ยอดสะสม",
+            title="ยอดเงินสะสมตลอดปี",
+            template="plotly_dark",
+            color_discrete_sequence=["#6366f1"],
+        )
+        fig_line.update_traces(fill="tozeroy", fillcolor="rgba(99,102,241,0.15)")
+        fig_line.update_layout(
+            plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
+            font_family="Prompt", title_font_size=15,
+            margin=dict(t=50, b=10, l=0, r=0),
+        )
+        st.plotly_chart(fig_line, width='stretch')
+
+# ══════════════════════════════════════════════════════════════════════════════
+# TAB 2 – ADD ENTRY
+# ══════════════════════════════════════════════════════════════════════════════
+with tab_add:
+    st.markdown("<div class='section-header'>➕ บันทึกรายการใหม่</div>", unsafe_allow_html=True)
+
+    with st.container(border=True):
+        col_type, col_cat = st.columns(2)
+        with col_type:
+            entry_type = st.radio("ประเภท", ["รายจ่าย", "รายรับ"], horizontal=True)
+        with col_cat:
+            cats = EXPENSE_CATS if entry_type == "รายจ่าย" else INCOME_CATS
+            emoji_cats = [f"{CATEGORY_CONFIG[c][0]} {c}" for c in cats]
+            sel_cat_display = st.selectbox("หมวดหมู่", emoji_cats)
+            sel_cat = sel_cat_display.split(" ", 1)[1]
+
+        d1, d2, d3 = st.columns([1, 1, 2])
+        with d1:
+            month = st.selectbox("เดือน", range(1, 13), index=CURRENT_MONTH - 1,
+                                  format_func=lambda m: MONTH_TH[m])
+        with d2:
+            day = st.selectbox("วันที่", range(1, 32), index=CURRENT_DAY - 1)
+        with d3:
+            amount = st.number_input("จำนวนเงิน (บาท)", min_value=0.0, step=10.0, format="%.2f")
+
+        suggestions = []
+        if not df.empty and "หมายเหตุ" in df.columns:
+            suggestions = df["หมายเหตุ"].dropna().unique().tolist()
+
+        is_new = st.toggle("พิมพ์รายละเอียดใหม่", value=True)
+        if is_new:
+            note = st.text_input("รายละเอียด / หมายเหตุ", placeholder="เช่น กะเพราไข่ดาว, ค่าน้ำมัน")
+        else:
+            note = st.selectbox("เลือกจากประวัติที่เคยบันทึก", options=[""] + suggestions)
+
+        submitted = st.button("💾 บันทึกข้อมูล", width='stretch', type="primary")
+        if submitted:
+            if amount <= 0:
+                st.warning("กรุณาระบุจำนวนเงินมากกว่า 0")
             else:
-                st.warning("กรุณาติ๊กช่อง 'ลบ' ก่อนครับ")
-    with col_btn2:
-        csv = df_current.to_csv(index=False).encode('utf-8-sig')
-        st.download_button("📥 Export ข้อมูลเป็น CSV", csv, "history.csv", "text/csv", use_container_width=True)
-else:
-    st.info("ยังไม่มีข้อมูลสำหรับปีนี้")
+                row = {
+                    "วันที่": f"{selected_year}-{month:02d}-{day:02d}",
+                    "รายการ": sel_cat,
+                    "ประเภทหลัก": entry_type,
+                    "จำนวนเงิน": amount,
+                    "หมายเหตุ": note,
+                    "ID": NOW.strftime("%Y%m%d%H%M%S%f"),
+                }
+                append_row(row, selected_year)
+                st.success(f"✅ บันทึกสำเร็จ! {'💸' if entry_type=='รายจ่าย' else '💰'} {sel_cat} ฿{amount:,.2f}")
+                st.rerun()
+
+# ══════════════════════════════════════════════════════════════════════════════
+# TAB 3 – HISTORY
+# ══════════════════════════════════════════════════════════════════════════════
+with tab_history:
+    st.markdown("<div class='section-header'>📋 ประวัติรายการทั้งหมด</div>", unsafe_allow_html=True)
+
+    if df.empty:
+        st.info("ยังไม่มีข้อมูล")
+    else:
+        # Filters
+        f1, f2, f3 = st.columns(3)
+        with f1:
+            filter_type = st.selectbox("กรองประเภท", ["ทั้งหมด", "รายรับ", "รายจ่าย"])
+        with f2:
+            filter_month = st.selectbox("กรองเดือน", ["ทั้งหมด"] + [MONTH_TH[m] for m in range(1, 13)])
+        with f3:
+            filter_cat = st.selectbox("กรองหมวดหมู่", ["ทั้งหมด"] + sorted(df["รายการ"].dropna().unique().tolist()))
+
+        df_filtered = df.copy()
+        if filter_type != "ทั้งหมด":
+            df_filtered = df_filtered[df_filtered["ประเภทหลัก"] == filter_type]
+        if filter_month != "ทั้งหมด":
+            m_idx = MONTH_TH.index(filter_month)
+            df_filtered = df_filtered[df_filtered["วันที่"].dt.month == m_idx]
+        if filter_cat != "ทั้งหมด":
+            df_filtered = df_filtered[df_filtered["รายการ"] == filter_cat]
+
+        st.caption(f"พบ {len(df_filtered):,} รายการ | รายรับ ฿{df_filtered[df_filtered['ประเภทหลัก']=='รายรับ']['จำนวนเงิน'].sum():,.0f} | รายจ่าย ฿{df_filtered[df_filtered['ประเภทหลัก']=='รายจ่าย']['จำนวนเงิน'].sum():,.0f}")
+
+        df_show = df_filtered.copy().sort_values("วันที่", ascending=False)
+        if "ลบ" not in df_show.columns:
+            df_show.insert(0, "ลบ", False)
+
+        df_show["วันที่_แสดง"] = df_show["วันที่"].dt.strftime("%d/%m/%Y")
+        cols_show = ["ลบ", "วันที่_แสดง", "ประเภทหลัก", "รายการ", "จำนวนเงิน", "หมายเหตุ", "ID"]
+        df_edit = df_show[[c for c in cols_show if c in df_show.columns]]
+
+        edited = st.data_editor(
+            df_edit,
+            column_config={
+                "ลบ": st.column_config.CheckboxColumn("🗑️", help="เลือกเพื่อลบ"),
+                "วันที่_แสดง": st.column_config.TextColumn("วันที่"),
+                "ประเภทหลัก": st.column_config.TextColumn("ประเภท"),
+                "รายการ": st.column_config.TextColumn("หมวดหมู่"),
+                "จำนวนเงิน": st.column_config.NumberColumn("จำนวนเงิน", format="฿%.2f"),
+                "หมายเหตุ": st.column_config.TextColumn("หมายเหตุ"),
+                "ID": None,
+            },
+            disabled=["วันที่_แสดง", "ประเภทหลัก", "รายการ", "จำนวนเงิน", "หมายเหตุ", "ID"],
+            width='stretch',
+            hide_index=True,
+        )
+
+        btn1, btn2, btn3 = st.columns(3)
+        with btn1:
+            if st.button("🗑️ ลบรายการที่เลือก", type="secondary", width='stretch'):
+                ids_del = edited[edited["ลบ"] == True]["ID"].tolist()
+                if ids_del:
+                    delete_rows(ids_del, selected_year)
+                    st.success(f"ลบ {len(ids_del)} รายการเรียบร้อย!")
+                    st.rerun()
+                else:
+                    st.warning("กรุณาติ๊กช่อง 🗑️ ก่อนลบ")
+        with btn2:
+            csv = df_filtered.to_csv(index=False).encode("utf-8-sig")
+            st.download_button("📥 Export CSV", csv, "history.csv", "text/csv", width='stretch')
+        with btn3:
+            try:
+                excel_buf = df_filtered.to_excel.__module__  # trigger import check
+                import io
+                buf = io.BytesIO()
+                df_filtered.to_excel(buf, index=False)
+                st.download_button("📊 Export Excel", buf.getvalue(),
+                                   "history.xlsx",
+                                   "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                   width='stretch')
+            except Exception:
+                pass
+
+# ══════════════════════════════════════════════════════════════════════════════
+# TAB 4 – DEEP ANALYSIS
+# ══════════════════════════════════════════════════════════════════════════════
+with tab_analysis:
+    st.markdown("<div class='section-header'>🔍 วิเคราะห์เชิงลึก</div>", unsafe_allow_html=True)
+
+    if df.empty:
+        st.info("ยังไม่มีข้อมูลเพียงพอสำหรับการวิเคราะห์")
+    else:
+        # ── Top spending categories ──
+        a1, a2 = st.columns(2)
+
+        with a1:
+            st.markdown("**💸 หมวดหมู่ที่ใช้เงินมากที่สุด**")
+            exp_by_cat = (
+                df[df["ประเภทหลัก"] == "รายจ่าย"]
+                .groupby("รายการ")["จำนวนเงิน"].sum()
+                .sort_values(ascending=False)
+                .reset_index()
+            )
+            if not exp_by_cat.empty:
+                fig_h = px.bar(
+                    exp_by_cat.head(8), x="จำนวนเงิน", y="รายการ",
+                    orientation="h", template="plotly_dark",
+                    color="จำนวนเงิน", color_continuous_scale="Reds",
+                )
+                fig_h.update_layout(
+                    plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
+                    font_family="Prompt", showlegend=False,
+                    coloraxis_showscale=False,
+                    margin=dict(t=10, b=10, l=0, r=0), yaxis_title="", xaxis_title="บาท",
+                )
+                st.plotly_chart(fig_h, width='stretch')
+
+        with a2:
+            st.markdown("**📅 รายจ่ายรายวัน (30 วันล่าสุด)**")
+            df_daily = df[df["ประเภทหลัก"] == "รายจ่าย"].copy()
+            if not df_daily.empty:
+                df_daily["วันที่"] = pd.to_datetime(df_daily["วันที่"])
+                daily = df_daily.groupby("วันที่")["จำนวนเงิน"].sum().reset_index().tail(30)
+                fig_daily = px.line(
+                    daily, x="วันที่", y="จำนวนเงิน",
+                    template="plotly_dark", markers=True,
+                    color_discrete_sequence=["#f87171"],
+                )
+                fig_daily.update_traces(marker_size=5)
+                fig_daily.update_layout(
+                    plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
+                    font_family="Prompt",
+                    margin=dict(t=10, b=10, l=0, r=0),
+                )
+                st.plotly_chart(fig_daily, width='stretch')
+
+        # ── Monthly savings rate ──
+        st.markdown("**💹 อัตราการออมรายเดือน**")
+        df_m = df.copy()
+        df_m["เดือน"] = df_m["วันที่"].dt.month
+        m_inc = df_m[df_m["ประเภทหลัก"] == "รายรับ"].groupby("เดือน")["จำนวนเงิน"].sum()
+        m_exp = df_m[df_m["ประเภทหลัก"] == "รายจ่าย"].groupby("เดือน")["จำนวนเงิน"].sum()
+        m_df  = pd.DataFrame({"รายรับ": m_inc, "รายจ่าย": m_exp}).fillna(0)
+        m_df["ออมได้"] = m_df["รายรับ"] - m_df["รายจ่าย"]
+        m_df["อัตราออม%"] = (m_df["ออมได้"] / m_df["รายรับ"].replace(0, 1) * 100).round(1)
+        m_df.index = m_df.index.map(lambda m: MONTH_TH[m])
+        m_df = m_df.reset_index().rename(columns={"index": "เดือน"})
+
+        fig_save = go.Figure()
+        fig_save.add_trace(go.Bar(
+            x=m_df["เดือน"], y=m_df["ออมได้"],
+            marker_color=["#22c55e" if v >= 0 else "#ef4444" for v in m_df["ออมได้"]],
+            name="ออมได้ (บาท)",
+        ))
+        fig_save.add_trace(go.Scatter(
+            x=m_df["เดือน"], y=m_df["อัตราออม%"],
+            mode="lines+markers+text", name="อัตราออม (%)",
+            yaxis="y2", line_color="#6366f1",
+            text=m_df["อัตราออม%"].map(lambda v: f"{v}%"),
+            textposition="top center", textfont_size=10,
+        ))
+        fig_save.update_layout(
+            yaxis2=dict(overlaying="y", side="right", title="อัตราออม (%)"),
+            template="plotly_dark",
+            plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
+            font_family="Prompt", legend=dict(orientation="h"),
+            margin=dict(t=20, b=10, l=0, r=0),
+        )
+        st.plotly_chart(fig_save, width='stretch')
+
+        # ── Summary table ──
+        st.markdown("**📊 สรุปรายเดือน**")
+        st.dataframe(
+            m_df.style.format({
+                "รายรับ": "฿{:,.0f}", "รายจ่าย": "฿{:,.0f}",
+                "ออมได้": "฿{:,.0f}", "อัตราออม%": "{:.1f}%",
+            }).applymap(
+                lambda v: "color:#4ade80" if isinstance(v, (int, float)) and v >= 0 else "color:#f87171",
+                subset=["ออมได้"],
+            ),
+            width='stretch', hide_index=True,
+        )
