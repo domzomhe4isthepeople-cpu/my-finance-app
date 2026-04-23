@@ -426,6 +426,14 @@ with tab_history:
             df_show.insert(0, "ลบ", False)
 
         df_show["วันที่_แสดง"] = df_show["วันที่"].dt.strftime("%d/%m/%Y")
+        # Force string types to prevent PyArrow OverflowError on large ID integers
+        df_show["ID"] = df_show["ID"].astype(str)
+        df_show["วันที่_แสดง"] = df_show["วันที่_แสดง"].astype(str)
+        df_show["ประเภทหลัก"] = df_show["ประเภทหลัก"].astype(str)
+        df_show["รายการ"] = df_show["รายการ"].astype(str)
+        df_show["หมายเหตุ"] = df_show["หมายเหตุ"].fillna("").astype(str)
+        df_show["จำนวนเงิน"] = pd.to_numeric(df_show["จำนวนเงิน"], errors="coerce").fillna(0.0)
+        df_show["ลบ"] = df_show["ลบ"].astype(bool)
         cols_show = ["ลบ", "วันที่_แสดง", "ประเภทหลัก", "รายการ", "จำนวนเงิน", "หมายเหตุ", "ID"]
         df_edit = df_show[[c for c in cols_show if c in df_show.columns]]
 
