@@ -230,10 +230,10 @@ c1, c2, c3, c4 = st.columns(4)
 balance_delta = income_total - expense_total
 c1.metric("💰 เงินคงเหลือ (รวม)", f"฿{final_balance:,.2f}",
           delta=f"{'▲' if balance_delta >= 0 else '▼'} ฿{abs(balance_delta):,.2f}")
-c2.metric("📈 รายรับสะสม (ปีนี้)", f"฿{income_total:,.0f}")
-c3.metric("📉 รายจ่ายสะสม (ปีนี้)", f"฿{expense_total:,.0f}")
-c4.metric(f"🗓️ รายจ่าย {MONTH_TH[CURRENT_MONTH]}", f"฿{exp_month:,.0f}",
-          delta=f"รายรับ ฿{inc_month:,.0f}" if inc_month else None)
+c2.metric("📈 รายรับสะสม (ปีนี้)", f"฿{income_total:,.2f}")
+c3.metric("📉 รายจ่ายสะสม (ปีนี้)", f"฿{expense_total:,.2f}")
+c4.metric(f"🗓️ รายจ่าย {MONTH_TH[CURRENT_MONTH]}", f"฿{exp_month:,.2f}",
+          delta=f"รายรับ ฿{inc_month:,.2f}" if inc_month else None)
 
 if monthly_budget > 0 and exp_month > 0:
     pct   = min(exp_month / monthly_budget * 100, 100)
